@@ -1,12 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 
+	"encoding/json"
+
 	"github.com/globalsign/mgo"
-	"github.com/globalsign/mgo/bson"
 	"github.com/gorilla/websocket"
 )
 
@@ -16,7 +16,7 @@ func init() {
 	var err error
 	session, err = mgo.Dial("mongodb://search_db:27017")
 	if err != nil {
-		fmt.Printf("Error initializing mongodb connection: %v\n", err)
+		log.Println("Error connecting to database", err)
 	}
 }
 
@@ -46,29 +46,24 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	for {
 		messageType, p, err := conn.ReadMessage()
 		if err != nil {
-			log.Println(err)
+			log.Println("Error reading from websocket", err)
 			return
 		}
 
-		insertMessage(db, Message{bson.NewObjectId(), string(p)})
-
-		if err := conn.WriteMessage(messageType, p); err != nil {
-			log.Println(err)
+		result, err := SearchPeople(db, string(p))
+		if err != nil {
+			log.Println("Error querying database", err)
 			return
 		}
-	}
-}
 
-type Message struct {
-	ID    bson.ObjectId `json:"_id" bson:"_id"`
-	Value string        `json:"value" bson:"value"`
-}
+		json, err := json.Marshal(result)
+		if err != nil {
+			log.Println("Error marshaling result to json", err)
+		}
 
-func insertMessage(db *mgo.Database, msg Message) {
-	fmt.Printf("Inserting %v to db\n", msg.Value)
-	col := db.C("message")
-	err := col.Insert(msg)
-	if err != nil {
-		fmt.Println(err.Error())
+		if err := conn.WriteMessage(messageType, json); err != nil {
+			log.Println("Error writing to websocket", err)
+			return
+		}
 	}
 }
